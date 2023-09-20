@@ -345,35 +345,7 @@ def get_trials(df_raw,df_sum,mode = 'Session', task = None):
         trials = df_raw.groupby(['Subject',mode],as_index=False)['Trial'].count()
         for num in np.sort(df_raw[mode].unique()):
             df_sum['trial_init' + str(num)] = trials.loc[trials[mode]==num].set_index('Subject')['Trial']
-        return df_sum
-#         df_cued = df_raw.loc[df_raw['Cued_Chosen'] == 1]
-            
-#         trials_cued = df_cued.groupby(['Subject', mode],as_index=False)['Trial'].max()
-#         for num in np.sort(df_cued[mode].unique()):
-#             df_sum['trial_cued_' + str(num)] = trials_cued.loc[trials_cued[mode]==num].set_index('Subject')['Trial']
-            
-#         df_uncued = df_raw.loc[df_raw['Uncued_Chosen'] == 1]
-            
-#         trials_uncued = df_uncued.groupby(['Subject', mode],as_index=False)['Trial'].max()
-#         for num in np.sort(df_uncued[mode].unique()):
-#             df_sum['trial_uncued_' + str(num)] = trials_uncued.loc[trials_uncued[mode]==num].set_index('Subject')['Trial']
-#         return df_sum
-
-# ---
-
-#         df_cued = df_raw.loc[df_raw['Cued_Chosen'] == 1]
-#         df_uncued = df_raw.loc[df_raw['Uncued_Chosen'] == 1]
-        
-#         trials_uncued = df_uncued.groupby(['Subject', mode],as_index=False)['Trial'].max()
-#         trials_cued = df_cued.groupby(['Subject', mode],as_index=False)['Trial'].max()
-
-#         for num in np.sort(df_raw[mode].unique()):
-#             df_sum['trial_cued_' + str(num)] = trials_cued.loc[trials_cued[mode]==num].set_index('Subject')['Trial']
-#             df_sum['trial_uncued_' + str(num)] = trials_uncued.loc[trials_uncued[mode]==num].set_index('Subject')['Trial']
-            
-#         return df_sum
-        
-        
+        return df_sum    
     trials = df_raw.groupby(['Subject', mode],as_index=False)['Trial'].max()
     for num in np.sort(df_raw[mode].unique()):
         df_sum['trial' + str(num)] = trials.loc[trials[mode]==num].set_index('Subject')['Trial']
@@ -411,17 +383,15 @@ def get_summary_data(df_raw, mode = 'Session', task = None):
 def get_long_summary_data(df_edited, df_sum, task = None): 
     "takes in the edited df (after dropping subjects and sessions) and wide-summary df, and outputs a long-summary df"
     "Cannot take subjects with different session numbers"
-    subs = df_edited.Subject.unique() #list of subjects
-    subs.sort() 
-
-    sess = list(df_edited.Session.unique())
-    sess.sort()
-    all_sess = []
-    for i in range(len(subs)): #for all subjects 
-        all_sess.append(sess) #all_sess is now a list of lists (sess)
-
-    df_temp = df_edited.groupby(['Subject','Session'],as_index=False)['Trial'].max()
-    df_temp.drop('Trial', inplace=True, axis=1)
+    sess_list = list(df_edited.Session.unique())
+    sess_list.sort()
+    
+    subs = list(df_edited.Subject.unique())
+    subs.sort()
+    subs_repeated = np.repeat(subs,len(sess_list))
+   
+    df_temp = pd.DataFrame({'Subject':subs_repeated, 
+                            'Session':sess_list*len(subs)})
 
     if task == 'choiceRGT':
         choice_names = ['P1_C','P2_C','P3_C','P4_C','P1_U','P2_U','P3_U','P4_U']
@@ -480,11 +450,12 @@ def get_risk_status_long(df_long_sum, sessions = None):
     subs = df_long_sum.Subject.unique()
     mean_risk_list = []
     sessions = filt_sess(df_long_sum, sessions)
+    all_sess = df_long_sum.Session.unique()
          
     for s in subs: 
         df_sub = df_long_sum.loc[(df_long_sum['Session'].isin(sessions)) & (df_long_sum['Subject'] == s)] #df where Subject == s and where Session == startsess to endsess 
         mean_risk = df_sub['risk'].mean() #mean_risk
-        for s in sessions:
+        for s in all_sess:
             mean_risk_list.append(mean_risk)
     df_long_sum["mean_risk"] = mean_risk_list 
     
@@ -508,6 +479,22 @@ def get_group_long(df_long, group_list):
                     df_long.at[row,'group'] = 3
                 elif group == group_list[3]:
                     df_long.at[row,'group'] = 4
+    return df_long
+
+def get_group_columns(df_long, group_list, group_names):
+    """takes in df_long, group_list, group_names and creates columns for each group in group_name and is coded such that 1 = member of that group, and 0 = not a member of that group; for mixed effects modeling purposes"""
+    #transform group names into a subscriptable list
+    group_names_list = list(group_names.values())
+    #create columns for each group 
+    for group_name in group_names_list: 
+        df_long[group_name] = ""
+
+    for i,group in enumerate(group_list): #for each group in the group list 
+        for row in df_long.index: #for each row
+            if np.isin(df_long.at[row,'Subject'], group): #if the subject is in that particular group
+                df_long.at[row,group_names[i]] = 1 #assign the value to the group_names column as 1
+            else: #otherwise set it as zero
+                df_long.at[row,group_names[i]] = 0
     return df_long
 
 #--------------------------------ANOVA-------------------------------#
@@ -671,6 +658,15 @@ def get_means_sem(df_sum, groups = None, group_names = None):
     return mean_scores, SEM
 
 
+def get_choice_averages(mean_scores,sess = None):
+    for j in range(1,5):
+        cols = []
+        for i in sess:
+            cols.append(mean_scores.columns.get_loc(str(i) + 'P' + str(j)))
+        print('P' + str(j))
+        print(mean_scores.iloc[:,np.r_[cols]].mean(axis=1))
+
+
 #------------------------------PLOTTING BY SESSION---------------------------------#
     
 def rgt_plot(variable,startsess,endsess,title,scores,sem, group_names = None, highlight = None, y_label = None, x_label = 'Session'):
@@ -783,6 +779,52 @@ def choice_bar_plot(startsess, endsess, scores, sem, task = None):
     ax.spines['bottom'].set_linewidth(2)
     ax.legend()
     
+    
+def choice_line_plot(option,startsess, endsess, title, scores, sem, group_names = None, highlight = None, y_label = None, x_label = 'Session'):
+    if y_label == None:
+        y_label = option
+    plt.rcParams.update({'font.size': 18})
+    fig,ax = plt.subplots(figsize = (15,8))
+    ax.set_ylabel(y_label, fontweight='bold', fontsize = 20)
+    ax.set_xlabel(x_label, fontweight = 'bold', fontsize = 20)
+    ax.set_title(title + ': ' + y_label + '\n' + x_label + ' ' + str(startsess) + '-' + str(endsess),
+                fontweight = 'bold', fontsize = 22, pad = 20)
+    ax.spines['right'].set_linewidth(0)
+    ax.spines['top'].set_linewidth(0)
+    ax.spines['left'].set_linewidth(2)
+    ax.spines['bottom'].set_linewidth(2)
+    ax.xaxis.set_major_locator(MaxNLocator(integer=True))
+    ax.set_xticks(np.arange(startsess,endsess+1))
+    
+    
+     #define x axis (range of session numbers we are graphing)
+    x=np.arange(startsess,endsess+1)
+    #extract column names to include in figure
+    columns = []
+    for col in scores.columns:
+        for session_number in [str(i) for i in x]: #turns session numbers in x into strings
+            #check if variable name is in column name and column name starts with session number + P option
+            if option in col and col.startswith(session_number + option):
+                #if so, append column name to columns list
+                columns.append(col)
+
+    if group_names == None:
+        y = scores.loc['All rats',columns]
+        plt.errorbar(x, y,
+                     yerr = sem.loc['All rats',columns], 
+                     linewidth=5, capsize = 8)
+    else:
+        for i,group in enumerate(group_names.values()):
+            y = scores.loc[group,columns]
+            plt.errorbar(x, y,
+                         yerr = sem.loc[group,columns], 
+                         label=group,linewidth=5, capsize = 8)
+            ax.legend()
+       
+    if highlight != None:
+        plt.axvline(highlight, 0, 1, color = 'gray', lw = 1)
+        ax.fill_between([highlight,endsess], ax.get_ylim()[0], ax.get_ylim()[1], facecolor='gray', alpha=0.2)
+        
 #------------------------------PLOTTING for Latin Squares---------------------------------#
     
 def ls_bar_plot(figure_group, group_means, sem):
